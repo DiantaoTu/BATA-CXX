@@ -13,7 +13,7 @@ function t=BATA(tij_index,tij_observe,param)
     index_ti_J = [index_ti_J index_ti_J+1 index_ti_J+2];    % index_ti_J 分别+0 +1 +2然后拼成一行
     index_ti_J = index_ti_J(ceil((1:3*size(index_ti_J,1))/3), :);   % 三个index_ti_J竖向堆叠 
     index_tj_I = [(1:3*numofobser)' (1:3*numofobser)' (1:3*numofobser)'];   % position of coefficient for Ri
-    index_tj_J = (tij_index(2,:)-1)*3+1;    % tij_index 低第二行所有数字减去1乘以3再加上1             
+    index_tj_J = (tij_index(2,:)-1)*3+1;    % tij_index 的第二行所有数字减去1乘以3再加上1             
     index_tj_J = [index_tj_J index_tj_J+1 index_tj_J+2];    % index_tj_J 分别+0 +1 +2然后拼成一行
     index_tj_J = index_tj_J(ceil((1:3*size(index_tj_J,1))/3), :);   % 三个index_tj_J竖向堆叠
     

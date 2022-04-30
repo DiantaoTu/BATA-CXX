@@ -1,7 +1,7 @@
 /*
  * @Author: your name
  * @Date: 2020-05-20 00:49:59
- * @LastEditTime: 2022-04-30 15:06:16
+ * @LastEditTime: 2022-04-30 18:51:38
  * @LastEditors: Please set LastEditors
  * @Description: In User Settings Edit
  * @FilePath: /test/main.cpp
@@ -32,16 +32,15 @@
 
 #include <random>
 #include <mutex>
+#include "BATA.h"
 
 using namespace std;
 
-vector<pair<size_t, size_t>> LoadTijIndex(string filename)
-{
-    
-}
 
 int main()
 {
-    
+    vector<pair<int, int>> pairs = LoadTijIndex("tij_index.txt");
+    eigen_vector<Eigen::Vector3d> relative_pose = LoadTij("tij_observe.txt"); 
+    BATA(pairs, relative_pose);
     return 0;
 }

@@ -2,22 +2,20 @@
  * @Author: Diantao Tu
  * @Date: 2022-04-30 15:04:48
  */
+#ifndef _COMMON_H_
+#define _COMMON_H_
+
 #include <iostream>
 #include <string>
 #include <vector>
+#include <Eigen/Core>
 
 using namespace std;
-vector<string> SplitString(const string& str, const char& delimma)
-{
-    vector<string> split;
-    stringstream ss(str);
-    string tmp;
-    while (getline(ss, tmp, delimma))
-    {
-        split.push_back(tmp);
-    }
-    return split;
-}
+
+template<typename T>
+using eigen_vector = std::vector<T, Eigen::aligned_allocator<T>>;
+
+vector<string> SplitString(const string& str, const char& delimma);
 
 template<typename T>
 inline T str2num(string str)
@@ -28,7 +26,7 @@ inline T str2num(string str)
         return num;
     }
     else{
-        cout << "str2num error";
+        cout << "str2num error" << endl;
         exit(0);
     }
 }
@@ -46,3 +44,5 @@ inline string num2str(T num)
         exit(0);
     }
 }
+
+#endif

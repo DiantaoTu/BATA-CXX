@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4)
-project(test)
+project(BATA)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_FLAGS "-fopenmp")
@@ -37,5 +37,5 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 message(STATUS "find opencv version:" ${OpenCV_VERSION})
 
 aux_source_directory(. source_file)
-add_executable(test ${source_file})
-target_link_libraries(test ${LIBRARIES} ${Sophus_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES} )
+add_executable(BATA ${source_file})
+target_link_libraries(BATA ${LIBRARIES} ${Sophus_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES} )
