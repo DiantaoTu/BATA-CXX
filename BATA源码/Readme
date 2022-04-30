@@ -1,0 +1,17 @@
+In this package we provide our implementation of the methods described in 
+Bingbing Zhuang, Loong-Fah Cheong, Gim Hee Lee, "Baseline Desensitizing In Translation Averaging", CVPR 2018.
+If you use this package, please cite the above listed paper. The corresponding bibtex entry is :
+
+@inproceedings{zhuang2018baseline,
+  title={Baseline desensitizing in translation averaging},
+  author={Zhuang, Bingbing and Cheong, Loong-Fah and Lee, Gim Hee}
+  booktitle={Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition},
+  year={2018}
+}
+
+The implementation is straightforward. A demo.m is provided to demonstrate the usage. 
+
+For comments/help please email zhuang.bingbing@u.nus.edu
+
+
+
