@@ -33,10 +33,138 @@ Eigen::SparseMatrix<double> SpliceMatrix(const Eigen::SparseMatrix<double>& A, c
     return spliced;
 }
 
-Eigen::MatrixXd LUDRevised(const int max_iteration, const Eigen::MatrixXd& tij_all, const Eigen::MatrixXd& At0_full)
+Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const int num_relative_pose,
+                            const Eigen::MatrixXd& tij_all, const Eigen::SparseMatrix<double>& At0_full,
+                            Eigen::VectorXd& S)
 {
     Eigen::VectorXd tij_sq_sum = tij_all.array().square().colwise().sum();
+    Eigen::SparseMatrix<double> Aeq1(num_relative_pose, 3 * num_relative_pose);
+    Aeq1.reserve(num_relative_pose * 3);
+    // 这个插入是按照列增加的顺序进行的，而且Aeq1本身就是colMajor的，因此直接插入速度会比较快，就不需要使用三元组了
+    for(size_t i = 0; i < num_relative_pose; i++)
+    {
+        Aeq1.insert(i, 3 * i) =  tij_all(0,i);
+        Aeq1.insert(i, 3 * i + 1) =  tij_all(1,i);
+        Aeq1.insert(i, 3 * i + 2) =  tij_all(2,i);
+    }
+    Aeq1 = Aeq1 * At0_full;
+    // Aeq 每一列只有两个非零元素，其中Aeq的第一行是Aeq1的每一列之和，后三行是单位阵水平堆叠
+    Eigen::SparseMatrix<double> Aeq(4, Aeq1.cols());
+    Aeq.reserve(2 * Aeq1.cols());  
+    for(size_t i = 0; i < Aeq.cols(); i++)
+    {
+        Aeq.insert(0, i) = Aeq1.col(i).sum();
+        Aeq.insert(i % 3 + 1, i) = 1;
+    }
+    Eigen::SparseMatrix<double> Aeq_transpose = Aeq.transpose();
+    Eigen::SparseMatrix<double> beq(4,1);
+    beq.insert(0,0) = num_relative_pose;
+    // Initialization with LUDRevised
+    Eigen::VectorXd Svec = Eigen::VectorXd::Random(num_relative_pose).array().abs();
+    Svec *= num_relative_pose / Svec.sum();
+    S = Svec.replicate(3,1);
+    Eigen::VectorXd W = Eigen::VectorXd::Ones(3 * num_relative_pose);
+    W = W.array().sqrt();
+    Eigen::VectorXd t;
+    for(int iter = 0; iter < max_iteration; iter ++)
+    {
+        Eigen::SparseMatrix<double> A(3 * num_relative_pose, 3 * num_relative_pose);
+        A.setIdentity();
+        A = A * W.asDiagonal() * At0_full;
+        Eigen::SparseMatrix<double> At = A.adjoint();
+        Eigen::MatrixXd B = W.array() * S.array() * tij_all.reshaped<Eigen::ColMajor>().array();
+        Eigen::SparseMatrix<double> A_full(A.cols() + 4, A.cols() + 4);
+        // A_full 可以分为四块，左上角是2 * A^T * A
+        // 右上角是 Aeq.transpose()
+        // 左下角是 Aeq
+        // 右下角是 零矩阵
+        A_full = SpliceMatrix(2 * At * A, Aeq_transpose, Aeq, Eigen::SparseMatrix<double>(4,4));
 
+        Eigen::SparseMatrix<double> b = SpliceMatrix(2 * At * Eigen::SparseMatrix<double>(B.sparseView()), Eigen::SparseMatrix<double>(0,0), 
+                                                    beq, Eigen::SparseMatrix<double>(0,0));
+
+        // Eigen::SparseQR<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solver;
+        Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+        solver.compute(A_full);
+        if(solver.info() != Eigen::Success)
+        {
+            cout << "decomposition failed" << endl;
+        }
+        Eigen::VectorXd X;
+        X = solver.solve(b);
+        if(solver.info() != Eigen::Success)
+        {
+            cout << "solving failed" << endl;
+        }
+
+        t = X.head(3 * num_camera);
+        Eigen::MatrixXd Aij = (At0_full * t).reshaped(3, num_relative_pose);
+
+        Svec = (Aij.array() * tij_all.array()).colwise().sum();
+        Svec = Svec.array() / tij_sq_sum.array();  
+
+        S = Svec.replicate(1,3).reshaped<Eigen::RowMajor>();
+
+        Eigen::MatrixXd tmp = At0_full * t;
+        tmp = (tmp.array() - S.array() * tij_all.reshaped<Eigen::ColMajor>().array()).reshaped(3, num_relative_pose);
+        tmp = tmp.array().square();
+        Eigen::MatrixXd tmp_col_sum = tmp.colwise().sum();
+        Eigen::MatrixXd Wvec = (tmp_col_sum.array() + 1e-6).pow(-0.5);
+        W = Wvec.replicate(3,1).reshaped<Eigen::ColMajor>();
+        W = W.array().sqrt();
+    }
+    Eigen::MatrixXd pose = t.reshaped(3, num_camera);
+    for(size_t i = 1; i < num_camera; i++)
+        pose.col(i) -= pose.col(0);
+    pose.col(0).setZero();
+    return pose;
+}
+
+Eigen::MatrixXd IRLS(const int inner_iteration, const int outer_iteration,
+                    const Eigen::MatrixXd& tij_all, const Eigen::SparseMatrix<double>& At0 , const Eigen::MatrixXd& init_pose,
+                    Eigen::VectorXd& S )
+{
+    int num_relative_pose = tij_all.cols();
+    int num_camera = init_pose.cols();
+    Eigen::VectorXd t = init_pose.rightCols(num_camera - 1).reshaped<Eigen::ColMajor>();
+    for(int i = 0; i < outer_iteration - 1; i++)
+    {
+        Eigen::SparseMatrix<double> A(3 * num_relative_pose, 3 * num_relative_pose);
+        A.setIdentity();
+        A = S.cwiseInverse().asDiagonal() * At0;
+        Eigen::VectorXd B = tij_all.reshaped<Eigen::ColMajor>();
+        Eigen::MatrixXd tmp = ((A*t - B).reshaped(3, num_relative_pose)).array().square();
+        Eigen::VectorXd tmp_col_sum = tmp.colwise().sum().cwiseSqrt();
+        
+        Eigen::VectorXd Wvec = Eigen::VectorXd::Zero(tmp_col_sum.rows());
+        Wvec = (tmp_col_sum.array() < 0.1).select(1, Wvec);
+        Wvec = (tmp_col_sum.array() > 0.1).select(0.1/tmp_col_sum.array() , Wvec);
+        
+        Eigen::VectorXd W = Wvec.replicate(1,3).reshaped<Eigen::RowMajor>();
+        W = W.cwiseSqrt();
+        for(int j = 0; j < inner_iteration; j++)
+        {
+            Eigen::MatrixXd Aij = (At0 * t).reshaped(3, num_relative_pose);
+            Eigen::VectorXd Svec = Aij.cwiseAbs2().colwise().sum();
+            tmp_col_sum = (Aij.array() * tij_all.array()).colwise().sum();
+            Svec = Svec.array() / tmp_col_sum.array();
+            Svec = (Svec.array() < 0).select(numeric_limits<double>::infinity(), Svec);
+            S = Svec.replicate(1,3).reshaped<Eigen::RowMajor>();
+            A = Eigen::VectorXd(W.array() / S.array()).asDiagonal() * At0;
+            B = W.array() * tij_all.reshaped<Eigen::ColMajor>().array();
+            Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+            solver.compute(A.transpose() * A);
+            if(solver.info() != Eigen::Success)
+                cout << "decomposition failed" << endl;
+            t = solver.solve(A.transpose() * B);
+            if(solver.info() != Eigen::Success)
+                cout << "solving failed" << endl;
+            
+        }
+    }
+    Eigen::MatrixXd pose(3, num_camera);
+    pose << Eigen::Vector3d::Zero(), t.reshaped(3, num_camera-1);
+    return pose;
 }
 
 vector<pair<int, int>> LoadTijIndex(string filename)
@@ -118,80 +246,8 @@ eigen_vector<Eigen::Vector3d> BATA(const vector<pair<int,int>>& pairs, const eig
     At0_full.setFromTriplets(triplet_list.begin(), triplet_list.end());
     triplet_list.clear();
     Eigen::SparseMatrix<double> At0 = At0_full.rightCols(3*num_camera -3);  // 舍弃前三列，也就是第一个相机对应的矩阵
-    Eigen::SparseMatrix<double> Aeq1(num_relative_pose, 3 * num_relative_pose);
-    Aeq1.reserve(num_relative_pose * 3);
-    // 这个插入是按照列增加的顺序进行的，而且Aeq1本身就是colMajor的，因此直接插入速度会比较快，就不需要使用三元组了
-    for(size_t i = 0; i < num_relative_pose; i++)
-    {
-        Aeq1.insert(i, 3 * i) = relative_pose[i].x();
-        Aeq1.insert(i, 3 * i + 1) = relative_pose[i].y();
-        Aeq1.insert(i, 3 * i + 2) = relative_pose[i].z();
-    }
-    Aeq1 = Aeq1 * At0_full;
-    // Aeq 每一列只有两个非零元素，其中Aeq的第一行是Aeq1的每一列之和，后三行是单位阵水平堆叠
-    Eigen::SparseMatrix<double> Aeq(4, Aeq1.cols());
-    Aeq.reserve(2 * Aeq1.cols());  
-    for(size_t i = 0; i < Aeq.cols(); i++)
-    {
-        Aeq.insert(0, i) = Aeq1.col(i).sum();
-        Aeq.insert(i % 3 + 1, i) = 1;
-    }
-    Eigen::SparseMatrix<double> Aeq_transpose = Aeq.transpose();
-    Eigen::SparseMatrix<double> beq(4,1);
-    beq.insert(0,0) = num_relative_pose;
-    // Initialization with LUDRevised
-    Eigen::VectorXd Svec = Eigen::VectorXd::Random(num_relative_pose).array().abs();
-    Svec *= num_relative_pose / Svec.sum();
-    Eigen::MatrixXd S = Svec.replicate(3,1);
-    Eigen::VectorXd W = Eigen::VectorXd::Ones(3 * num_relative_pose);
-    W = W.array().sqrt();
-    for(int iter = 0; iter < 5; iter ++)
-    {
-        Eigen::SparseMatrix<double> A(3 * num_relative_pose, 3 * num_relative_pose);
-        A.setIdentity();
-        A = A * W.asDiagonal() * At0_full;
-        Eigen::SparseMatrix<double> At = A.adjoint();
-        Eigen::MatrixXd B = W.array() * S.array() * tij_all.reshaped<Eigen::ColMajor>().array();
-        Eigen::SparseMatrix<double> A_full(A.cols() + 4, A.cols() + 4);
-        // A_full 可以分为四块，左上角是2 * A^T * A
-        // 右上角是 Aeq.transpose()
-        // 左下角是 Aeq
-        // 右下角是 零矩阵
-        A_full = SpliceMatrix(2 * At * A, Aeq_transpose, Aeq, Eigen::SparseMatrix<double>(4,4));
-
-        Eigen::SparseMatrix<double> b = SpliceMatrix(2 * At * Eigen::SparseMatrix<double>(B.sparseView()), Eigen::SparseMatrix<double>(0,0), 
-                                                    beq, Eigen::SparseMatrix<double>(0,0));
-
-        // Eigen::SparseQR<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solver;
-        Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-        solver.compute(A_full);
-        if(solver.info() != Eigen::Success)
-        {
-            cout << "decomposition failed" << endl;
-        }
-        Eigen::VectorXd X;
-        X = solver.solve(b);
-        if(solver.info() != Eigen::Success)
-        {
-            cout << "solving failed" << endl;
-        }
-
-        Eigen::VectorXd t = X.head(3 * num_camera);
-        Eigen::MatrixXd Aij = (At0_full * t).reshaped(3, num_relative_pose);
-
-        Svec = (Aij.array() * tij_all.array()).colwise().sum();
-        Svec = Svec.array() / tij_sq_sum.array();  
-
-        S = Svec.replicate(1,3).reshaped<Eigen::RowMajor>();
-
-        Eigen::MatrixXd tmp = At0_full * t;
-        tmp = (tmp.array() - S.array() * tij_all.reshaped<Eigen::ColMajor>().array()).reshaped(3, num_relative_pose);
-        tmp = tmp.array().square();
-        Eigen::MatrixXd tmp_col_sum = tmp.colwise().sum();
-        Eigen::MatrixXd Wvec = (tmp_col_sum.array() + 1e-6).pow(-0.5);
-
-        W = Wvec.replicate(3,1).reshaped<Eigen::ColMajor>();
-        W = W.array().sqrt();
-    }
+    Eigen::VectorXd S;
+    Eigen::MatrixXd pose_LUD = LUDRevised(10, num_camera, num_relative_pose, tij_all, At0_full, S);
+    Eigen::MatrixXd pose_BATA = IRLS(10,10, tij_all, At0, pose_LUD, S);
     return eigen_vector<Eigen::Vector3d>();
 }
