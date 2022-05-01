@@ -33,10 +33,11 @@ Eigen::SparseMatrix<double> SpliceMatrix(const Eigen::SparseMatrix<double>& A, c
     return spliced;
 }
 
-Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const int num_relative_pose,
+Eigen::MatrixXd LUDRevised(const Config& config, const int num_camera,
                             const Eigen::MatrixXd& tij_all, const Eigen::SparseMatrix<double>& At0_full,
                             Eigen::VectorXd& S)
 {
+    int num_relative_pose = tij_all.cols();
     Eigen::VectorXd tij_sq_sum = tij_all.array().square().colwise().sum();
     Eigen::SparseMatrix<double> Aeq1(num_relative_pose, 3 * num_relative_pose);
     Aeq1.reserve(num_relative_pose * 3);
@@ -66,7 +67,7 @@ Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const 
     Eigen::VectorXd W = Eigen::VectorXd::Ones(3 * num_relative_pose);
     W = W.array().sqrt();
     Eigen::VectorXd t;
-    for(int iter = 0; iter < max_iteration; iter ++)
+    for(int iter = 0; iter < config.init_iteration; iter ++)
     {
         Eigen::SparseMatrix<double> A(3 * num_relative_pose, 3 * num_relative_pose);
         A.setIdentity();
@@ -87,15 +88,11 @@ Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const 
         Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
         solver.compute(A_full);
         if(solver.info() != Eigen::Success)
-        {
             cout << "decomposition failed" << endl;
-        }
         Eigen::VectorXd X;
         X = solver.solve(b);
         if(solver.info() != Eigen::Success)
-        {
             cout << "solving failed" << endl;
-        }
 
         t = X.head(3 * num_camera);
         Eigen::MatrixXd Aij = (At0_full * t).reshaped(3, num_relative_pose);
@@ -109,7 +106,7 @@ Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const 
         tmp = (tmp.array() - S.array() * tij_all.reshaped<Eigen::ColMajor>().array()).reshaped(3, num_relative_pose);
         tmp = tmp.array().square();
         Eigen::MatrixXd tmp_col_sum = tmp.colwise().sum();
-        Eigen::MatrixXd Wvec = (tmp_col_sum.array() + 1e-6).pow(-0.5);
+        Eigen::MatrixXd Wvec = (tmp_col_sum.array() + config.delta).pow(-0.5);
         W = Wvec.replicate(3,1).reshaped<Eigen::ColMajor>();
         W = W.array().sqrt();
     }
@@ -120,14 +117,14 @@ Eigen::MatrixXd LUDRevised(const int max_iteration, const int num_camera, const 
     return pose;
 }
 
-Eigen::MatrixXd IRLS(const int inner_iteration, const int outer_iteration,
-                    const Eigen::MatrixXd& tij_all, const Eigen::SparseMatrix<double>& At0 , const Eigen::MatrixXd& init_pose,
+Eigen::MatrixXd IRLS(const Config& config, const Eigen::MatrixXd& tij_all,
+                    const Eigen::SparseMatrix<double>& At0 , const Eigen::MatrixXd& init_pose,
                     Eigen::VectorXd& S )
 {
     int num_relative_pose = tij_all.cols();
     int num_camera = init_pose.cols();
     Eigen::VectorXd t = init_pose.rightCols(num_camera - 1).reshaped<Eigen::ColMajor>();
-    for(int i = 0; i < outer_iteration - 1; i++)
+    for(int i = 0; i < config.outer_iteration - 1; i++)
     {
         Eigen::SparseMatrix<double> A(3 * num_relative_pose, 3 * num_relative_pose);
         A.setIdentity();
@@ -137,12 +134,12 @@ Eigen::MatrixXd IRLS(const int inner_iteration, const int outer_iteration,
         Eigen::VectorXd tmp_col_sum = tmp.colwise().sum().cwiseSqrt();
         
         Eigen::VectorXd Wvec = Eigen::VectorXd::Zero(tmp_col_sum.rows());
-        Wvec = (tmp_col_sum.array() < 0.1).select(1, Wvec);
-        Wvec = (tmp_col_sum.array() > 0.1).select(0.1/tmp_col_sum.array() , Wvec);
+        Wvec = (tmp_col_sum.array() < config.robust_threshold).select(1, Wvec);
+        Wvec = (tmp_col_sum.array() > config.robust_threshold).select(config.robust_threshold / tmp_col_sum.array() , Wvec);
         
         Eigen::VectorXd W = Wvec.replicate(1,3).reshaped<Eigen::RowMajor>();
         W = W.cwiseSqrt();
-        for(int j = 0; j < inner_iteration; j++)
+        for(int j = 0; j < config.init_iteration; j++)
         {
             Eigen::MatrixXd Aij = (At0 * t).reshaped(3, num_relative_pose);
             Eigen::VectorXd Svec = Aij.cwiseAbs2().colwise().sum();
@@ -159,7 +156,6 @@ Eigen::MatrixXd IRLS(const int inner_iteration, const int outer_iteration,
             t = solver.solve(A.transpose() * B);
             if(solver.info() != Eigen::Success)
                 cout << "solving failed" << endl;
-            
         }
     }
     Eigen::MatrixXd pose(3, num_camera);
@@ -207,7 +203,7 @@ eigen_vector<Eigen::Vector3d> LoadTij(string filename)
     return Tij;
 }
 
-eigen_vector<Eigen::Vector3d> BATA(const vector<pair<int,int>>& pairs, const eigen_vector<Eigen::Vector3d>& relative_pose)
+eigen_vector<Eigen::Vector3d> BATA(const vector<pair<int,int>>& pairs, const eigen_vector<Eigen::Vector3d>& relative_pose, const Config& config)
 {
     assert(pairs.size() == relative_pose.size());
     const int num_relative_pose = relative_pose.size();
@@ -247,7 +243,10 @@ eigen_vector<Eigen::Vector3d> BATA(const vector<pair<int,int>>& pairs, const eig
     triplet_list.clear();
     Eigen::SparseMatrix<double> At0 = At0_full.rightCols(3*num_camera -3);  // 舍弃前三列，也就是第一个相机对应的矩阵
     Eigen::VectorXd S;
-    Eigen::MatrixXd pose_LUD = LUDRevised(10, num_camera, num_relative_pose, tij_all, At0_full, S);
-    Eigen::MatrixXd pose_BATA = IRLS(10,10, tij_all, At0, pose_LUD, S);
-    return eigen_vector<Eigen::Vector3d>();
+    Eigen::MatrixXd pose_LUD = LUDRevised(config, num_camera, tij_all, At0_full, S);
+    Eigen::MatrixXd pose_BATA = IRLS(config, tij_all, At0, pose_LUD, S);
+    eigen_vector<Eigen::Vector3d> global_pose;
+    for(size_t i = 0; i < pose_BATA.cols(); i++)
+        global_pose.push_back(pose_BATA.col(i));
+    return global_pose;
 }

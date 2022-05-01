@@ -15,18 +15,8 @@ ELSE()
         MESSAGE(STATUS "Set defalult CMAKE_BUILD_TYPE = Release")
 ENDIF()
 
-FIND_PACKAGE(Sophus REQUIRED)
-INCLUDE_DIRECTORIES(${Sophus_INCLUDE_DIRS})
 
 INCLUDE_DIRECTORIES("/usr/local/include/eigen3/")
-
-find_package(PCL REQUIRED)
-INCLUDE_DIRECTORIES(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS}) 
-add_definitions(${PCL_DEFINITIONS})
-
-find_package(Ceres REQUIRED)
-include_directories(${Ceres_INCLUDE_DIRS})
 
 SET(LIBRARIES
         boost_filesystem
@@ -38,4 +28,4 @@ message(STATUS "find opencv version:" ${OpenCV_VERSION})
 
 aux_source_directory(. source_file)
 add_executable(BATA ${source_file})
-target_link_libraries(BATA ${LIBRARIES} ${Sophus_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES} )
+target_link_libraries(BATA ${LIBRARIES} )
