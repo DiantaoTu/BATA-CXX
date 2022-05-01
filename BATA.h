@@ -8,6 +8,9 @@
 #include <iostream>
 #include <fstream>
 #include <Eigen/Sparse>
+#include <Eigen/SparseCholesky>
+#include <Eigen/SparseLU>
+#include <Eigen/SparseQR>
 
 eigen_vector<Eigen::Vector3d> BATA(const vector<pair<int,int>>& pairs, const eigen_vector<Eigen::Vector3d>& relative_pose);
 
