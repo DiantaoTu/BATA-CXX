@@ -22,9 +22,6 @@ SET(LIBRARIES
         boost_filesystem
         glog
         )
-find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
-message(STATUS "find opencv version:" ${OpenCV_VERSION})
 
 aux_source_directory(. source_file)
 add_executable(BATA ${source_file})
