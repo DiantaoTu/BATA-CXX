@@ -3,7 +3,7 @@
         {
             "type": "shell",
             "label": "cmake",
-            "command": "cmake -DCMAKE_BUILD_TYPE=Debug .. && make -j4",
+            "command": "cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4",
             "args": [
             
             ],

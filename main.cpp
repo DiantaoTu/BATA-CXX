@@ -1,10 +1,6 @@
 /*
- * @Author: your name
- * @Date: 2020-05-20 00:49:59
- * @LastEditTime: 2022-05-01 20:49:23
- * @LastEditors: Please set LastEditors
- * @Description: In User Settings Edit
- * @FilePath: /test/main.cpp
+ * @Author: Diantao Tu
+ * @Date: 2022-04-30 16:18:24
  */
 #include <vector>
 #include <iostream>
@@ -22,5 +18,9 @@ int main()
     eigen_vector<Eigen::Vector3d> relative_pose = LoadTij("tij_observe.txt"); 
     Config config;
     eigen_vector<Eigen::Vector3d> global_pose = BATA(pairs, relative_pose, config);
+    ofstream f("my_BATA.txt");
+    for(const Eigen::Vector3d& p : global_pose)
+        f << p.x() << " " << p.y() << " " << p.z() << endl;
+    f.close();
     return 0;
 }

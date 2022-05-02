@@ -6,6 +6,44 @@
 
 using namespace std;
 
+
+/*** For Debug***/
+#define NAME(variable) (#variable)
+
+#define DEBUG(variable) \
+cout << NAME(variable) << " : " << variable.rows() << " x " << variable.cols() << "\n"; \
+PrintMatrix(variable)
+
+Eigen::VectorXd LoadVector(string filename)
+{
+    Eigen::VectorXd vec;
+    vector<double> v;
+    ifstream f(filename);
+    while(!f.eof())
+    {
+        string line;
+        getline(f, line);
+        vector<string> sub_line = SplitString(line, ' ');
+        for(const string& s : sub_line)
+            v.push_back(str2num<double>(s));
+    }
+    vec = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(v.data(), v.size());
+    return vec;
+}
+
+template<typename T, int M, int N>
+void PrintMatrix(Eigen::Matrix<T, M, N>& mat)
+{
+    for(int i = 0; i < mat.rows(); i++)
+        cout << mat.row(i) << endl;
+    cout << "==========" << endl;
+}
+
+void PrintMatrix(const Eigen::SparseMatrix<double>& mat)
+{
+    cout << mat << endl << "===============" << endl;
+}
+
 // 对稀疏矩阵进行拼接，把四个矩阵 ABCD 拼接为一个矩阵 [A B ; C D] ，也就是左上角为A，右上角为B，左下角为C，右下角为D
 // 对ABCD的要求是：1. 矩阵必须都是 colMajor的 2. A和B行数相等，A和C列数相等
 // 由于矩阵都是列优先的，所以只能按列拼接，也就是水平拼接，所以整体步骤为： 
@@ -62,8 +100,10 @@ Eigen::MatrixXd LUDRevised(const Config& config, const int num_camera,
     beq.insert(0,0) = num_relative_pose;
     // Initialization with LUDRevised
     Eigen::VectorXd Svec = Eigen::VectorXd::Random(num_relative_pose).array().abs();
+    // Load vector from file to avoid random, only used for deubg 
+    // Eigen::VectorXd Svec = LoadVector("Svec.txt");
     Svec *= num_relative_pose / Svec.sum();
-    S = Svec.replicate(3,1);
+    S = Svec.replicate(1,3).reshaped<Eigen::RowMajor>();
     Eigen::VectorXd W = Eigen::VectorXd::Ones(3 * num_relative_pose);
     W = W.array().sqrt();
     Eigen::VectorXd t;
@@ -75,15 +115,10 @@ Eigen::MatrixXd LUDRevised(const Config& config, const int num_camera,
         Eigen::SparseMatrix<double> At = A.adjoint();
         Eigen::MatrixXd B = W.array() * S.array() * tij_all.reshaped<Eigen::ColMajor>().array();
         Eigen::SparseMatrix<double> A_full(A.cols() + 4, A.cols() + 4);
-        // A_full 可以分为四块，左上角是2 * A^T * A
-        // 右上角是 Aeq.transpose()
-        // 左下角是 Aeq
-        // 右下角是 零矩阵
         A_full = SpliceMatrix(2 * At * A, Aeq_transpose, Aeq, Eigen::SparseMatrix<double>(4,4));
 
         Eigen::SparseMatrix<double> b = SpliceMatrix(2 * At * Eigen::SparseMatrix<double>(B.sparseView()), Eigen::SparseMatrix<double>(0,0), 
                                                     beq, Eigen::SparseMatrix<double>(0,0));
-
         // Eigen::SparseQR<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solver;
         Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
         solver.compute(A_full);
@@ -93,13 +128,11 @@ Eigen::MatrixXd LUDRevised(const Config& config, const int num_camera,
         X = solver.solve(b);
         if(solver.info() != Eigen::Success)
             cout << "solving failed" << endl;
-
         t = X.head(3 * num_camera);
         Eigen::MatrixXd Aij = (At0_full * t).reshaped(3, num_relative_pose);
 
         Svec = (Aij.array() * tij_all.array()).colwise().sum();
         Svec = Svec.array() / tij_sq_sum.array();  
-
         S = Svec.replicate(1,3).reshaped<Eigen::RowMajor>();
 
         Eigen::MatrixXd tmp = At0_full * t;
@@ -170,11 +203,13 @@ vector<pair<int, int>> LoadTijIndex(string filename)
     ifstream f(filename);
     string line;
     getline(f, line);
+    // 读取的时候一定要先变成double再变成int，因为index也是以科学计数法的形式保存的，
+    // 直接用int类型会忽略科学计数法
     for(const string& s : SplitString(line, ' '))
-        idx1.push_back(str2num<int>(s));
+        idx1.push_back(static_cast<int>(str2num<double>(s)));
     getline(f, line);
     for(const string& s : SplitString(line, ' '))
-        idx2.push_back(str2num<int>(s));
+        idx2.push_back(static_cast<int>(str2num<double>(s)));
     assert(idx1.size() == idx2.size());
     for(size_t i = 0; i < idx1.size(); i++)
         pairs.push_back({idx1[i], idx2[i]});
